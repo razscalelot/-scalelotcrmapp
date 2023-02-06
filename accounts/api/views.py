@@ -45,7 +45,7 @@ class SignUpUser(APIView):
                         }
                         primary.customers.insert_one(obj)
                         secondaryDB = secondary['scalelot_'+data['mobile']].superadmin.insert_one(obj)
-                        secondaryDB
+                        # secondaryDB
                         return onSuccess("Otp send successfull", 1)
                         # else:
                         #     return badRequest("Something went wrong, unable to send otp for given mobile number, please try again.")
