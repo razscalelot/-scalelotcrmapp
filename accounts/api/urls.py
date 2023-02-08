@@ -6,4 +6,6 @@ urlpatterns = [
     path('signin', SignInUser.as_view(), name="SignInUser"),
     path('verifyotp', VerifyOtp.as_view(), name="VerifyOtp"),
     path('verifymobile', VerifyMobile.as_view(), name="VerifyMobile"),
+    path('forgotpassword', ForgotPassword.as_view(), name="ForgotPassword"),
+    path('changepassword', ChangePassword.as_view(), name="ChangePassword"),
 ]
