@@ -27,35 +27,40 @@ class SignUpUser(APIView):
             if len(data['mobile']) == 10 and re.match("[6-9][0-9]{9}", data['mobile']):
                 if data['email'] != '' and re.match("^[a-zA-Z0-9-_]+@[a-zA-Z0-9]+\.[a-z]{1,3}$", data["email"]):
                     if data['company_name'] != '':
-                        url = config('FACTOR_URL') + (data['mobile']) + '/AUTOGEN'
-                        otpSend = requests.get(url, headers)
-                        response = json.loads(otpSend.text)
-                        if response["Status"] == "Success":
-                            password = createPassword()
-                            hostname = socket.gethostname()
-                            ip_address = socket.gethostbyname(hostname)
-                            obj = {
-                                "id": uuid.uuid4().hex,
-                                "name": data['name'],
-                                "mobile": data['mobile'],
-                                "password": make_password(password, config("PASSWORD_KEY")),
-                                "email": data['email'],
-                                "company_name": data['company_name'],
-                                "is_demo": True,
-                                "is_approved": True,
-                                "status": True,
-                                "mobileverified": True,
-                                "free_trial": 15,
-                                "key": response["Details"],
-                                "ip_address": ip_address,
-                                "hostname": hostname,
-                                "created_at": datetime.now()
-                            }
-                            primary.customers.insert_one(obj)
-                            return onSuccess("Otp send successfull", {"password": password, "response": response})
+                        existingUser = primary.customers.find_one(
+                            {'$or': [{"mobile": data["mobile"]}, {"email": data["email"]}]})
+                        if not existingUser:
+                            url = config('FACTOR_URL') + (data['mobile']) + '/AUTOGEN'
+                            otpSend = requests.get(url, headers)
+                            response = json.loads(otpSend.text)
+                            if response["Status"] == "Success":
+                                password = createPassword()
+                                hostname = socket.gethostname()
+                                ip_address = socket.gethostbyname(hostname)
+                                obj = {
+                                    "_id": uuid.uuid4().hex,
+                                    "name": data['name'],
+                                    "mobile": data['mobile'],
+                                    "password": make_password(password, config("PASSWORD_KEY")),
+                                    "email": data['email'],
+                                    "company_name": data['company_name'],
+                                    "is_demo": True,
+                                    "is_approved": True,
+                                    "status": True,
+                                    "mobileverified": False,
+                                    "otpVerifyKey": response["Details"],
+                                    "free_trial": 15,
+                                    "ip_address": ip_address,
+                                    "hostname": hostname,
+                                    "created_at": datetime.now()
+                                }
+                                primary.customers.insert_one(obj)
+                                return onSuccess("Otp send successfull", {"password": password, "response": response})
+                            else:
+                                return badRequest(
+                                    "Something went wrong, unable to send otp for given mobile number, please try again.")
                         else:
-                            return badRequest(
-                                "Something went wrong, unable to send otp for given mobile number, please try again.")
+                            return badRequest("User already exist with same mobile or email, Please try again.")
                     else:
                         return badRequest("Invalid company name, Please try again.")
                 else:
@@ -66,10 +71,44 @@ class SignUpUser(APIView):
             return badRequest("Invalid your name, Please try again.")
 
 
-# class VerifyOtp(APIView):
-#     def post(self, request):
-#         data = request.data
-#         if data
+class VerifyOtp(APIView):
+    def post(self, request):
+        data = request.data
+        if data["key"] != '' and data["otp"] != '' and data["mobile"]:
+            userData = primary.customers.find_one({"mobile": data["mobile"], "otpVerifyKey": data["key"]})
+            if userData:
+                url = config("FACTOR_URL") + "VERIFY/" + data["key"] + "/" + data["otp"]
+                otpSend = requests.get(url, headers)
+                response = json.loads(otpSend.text)
+                if response["Status"] == "Success":
+                    primary.customers.find_one_and_update({"_id": userData["_id"]},
+                                                          {"$set": {"mobileverified": True}})
+                    return onSuccess("User mobile number verified successfully!", 1)
+                else:
+                    return badRequest("Invalid OTP, please try again")
+            else:
+                return badRequest("Invalid data to verify user mobile number, please try again.")
+        else:
+            return badRequest("Invalid otp or mobile number to verify user mobile number, please try again.")
+
+class VerifyMobile(APIView):
+    def post(self, request):
+        data = request.data
+        if len(data['mobile']) == 10 and re.match("[6-9][0-9]{9}", data['mobile']):
+            customer = primary.customers.find_one({"mobile": data["mobile"], "is_approved": True, "status": True})
+            if customer is not None:
+                url = config('FACTOR_URL') + (data['mobile']) + '/AUTOGEN'
+                otpSend = requests.get(url, headers)
+                response = json.loads(otpSend.text)
+                if response["Status"] == "Success":
+                    primary.customers.find_one_and_update({"_id": customer["_id"]}, {"$set": {"otpVerifyKey": response["Details"]}})
+                    return onSuccess("Otp send successfull", response)
+                else:
+                    return badRequest("Something went wrong, unable to send otp for given mobile number, please try again.")
+            else:
+                return badRequest("This mobile number is not register with us, Please try again.")
+        else:
+            return badRequest("Invalid mobile number, Please try again.")
 
 
 class SignInUser(APIView):
@@ -77,37 +116,39 @@ class SignInUser(APIView):
         data = request.data
         if data['mobile'] != '' and len(data['mobile']) == 10 and re.match("[6-9][0-9]{9}", data['mobile']):
             if data['password'] != '' and len(data['password']) >= 8:
-                customer = primary.customers.find_one(
-                    {"mobile": data["mobile"], "is_approved": True, "mobileverified": True, "status": True})
+                customer = primary.customers.find_one({"mobile": data["mobile"], "is_approved": True, "status": True})
                 if customer is not None:
-                    checkPassword = check_password(data['password'], customer['password'])
-                    if checkPassword:
-                        createSecondaryDB = 'scalelot_' + data['mobile']
-                        secondaryDB = secondary[createSecondaryDB]
-                        secondaryDB.superadmins.insert_one(customer)
-                        permissionsData = [
-                            {
-                                "collectionName": "roles",
-                                "insertUpdate": True,
-                                "delete": True,
-                                "view": True,
-                                "_id": ObjectId(),
-                                "id": uuid.uuid4().hex,
-                            },
-                            {
-                                "collectionName": "permissions",
-                                "insertUpdate": True,
-                                "delete": True,
-                                "view": True,
-                                "_id": ObjectId(),
-                                "id": uuid.uuid4().hex,
-                            },
-                        ]
-                        secondaryDB.permissions.insert_many(permissionsData)
-                        token = create_access_token(customer['id'], createSecondaryDB)
-                        return onSuccess("Login successfull", token)
+                    if customer["mobileverified"]:
+                        checkPassword = check_password(data['password'], customer['password'])
+                        if checkPassword:
+                            createSecondaryDB = 'scalelot_' + data['mobile']
+                            secondaryDB = secondary[createSecondaryDB]
+                            adminExist = secondaryDB.superadmins.find_one({"mobile": customer["mobile"]})
+                            if not adminExist:
+                                secondaryDB.superadmins.insert_one(customer)
+                            permissionsData = [
+                                {
+                                    "collectionName": "roles",
+                                    "insertUpdate": True,
+                                    "delete": True,
+                                    "view": True,
+                                    "_id": uuid.uuid4().hex,
+                                },
+                                {
+                                    "collectionName": "permissions",
+                                    "insertUpdate": True,
+                                    "delete": True,
+                                    "view": True,
+                                    "_id": uuid.uuid4().hex,
+                                },
+                            ]
+                            secondaryDB.permissions.insert_many(permissionsData)
+                            token = create_access_token(customer['_id'], createSecondaryDB)
+                            return onSuccess("Login successfull", token)
+                        else:
+                            return badRequest("Invalid mobile or password, Please try again.")
                     else:
-                        return badRequest("Invalid mobile or password, Please try again.")
+                        return badRequest("This mobile number is not verifyed with us, please try again.")
                 else:
                     return badRequest("Invalid mobile or password, Please try again.")
             else:
