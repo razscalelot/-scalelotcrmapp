@@ -27,33 +27,35 @@ class SignUpUser(APIView):
             if len(data['mobile']) == 10 and re.match("[6-9][0-9]{9}", data['mobile']):
                 if data['email'] != '' and re.match("^[a-zA-Z0-9-_]+@[a-zA-Z0-9]+\.[a-z]{1,3}$", data["email"]):
                     if data['company_name'] != '':
-                        # url = config('FACTOR_URL') + (data['mobile']) + '/AUTOGEN'
-                        # otpSend = requests.get(url, headers)
-                        # response = json.loads(otpSend.text)
-                        # if response["Status"] == "Success":
-                        password = createPassword()
-                        hostname = socket.gethostname()
-                        ip_address = socket.gethostbyname(hostname)
-                        obj = {
-                            "id": uuid.uuid4().hex,
-                            "name": data['name'],
-                            "mobile": data['mobile'],
-                            "password": make_password(password, config("PASSWORD_KEY")),
-                            "email": data['email'],
-                            "company_name": data['company_name'],
-                            "is_demo": True,
-                            "is_approved": True,
-                            "status": True,
-                            "mobileverified": True,
-                            "free_trial": 15,
-                            "ip_address": ip_address,
-                            "hostname": hostname,
-                            "created_at": datetime.now()
-                        }
-                        primary.customers.insert_one(obj)
-                        return onSuccess("Otp send successfull", {"password": password})
-                        # else:
-                        #     return badRequest("Something went wrong, unable to send otp for given mobile number, please try again.")
+                        url = config('FACTOR_URL') + (data['mobile']) + '/AUTOGEN'
+                        otpSend = requests.get(url, headers)
+                        response = json.loads(otpSend.text)
+                        if response["Status"] == "Success":
+                            password = createPassword()
+                            hostname = socket.gethostname()
+                            ip_address = socket.gethostbyname(hostname)
+                            obj = {
+                                "id": uuid.uuid4().hex,
+                                "name": data['name'],
+                                "mobile": data['mobile'],
+                                "password": make_password(password, config("PASSWORD_KEY")),
+                                "email": data['email'],
+                                "company_name": data['company_name'],
+                                "is_demo": True,
+                                "is_approved": True,
+                                "status": True,
+                                "mobileverified": True,
+                                "free_trial": 15,
+                                "key": response["Details"],
+                                "ip_address": ip_address,
+                                "hostname": hostname,
+                                "created_at": datetime.now()
+                            }
+                            primary.customers.insert_one(obj)
+                            return onSuccess("Otp send successfull", {"password": password, "response": response})
+                        else:
+                            return badRequest(
+                                "Something went wrong, unable to send otp for given mobile number, please try again.")
                     else:
                         return badRequest("Invalid company name, Please try again.")
                 else:
@@ -64,12 +66,19 @@ class SignUpUser(APIView):
             return badRequest("Invalid your name, Please try again.")
 
 
+# class VerifyOtp(APIView):
+#     def post(self, request):
+#         data = request.data
+#         if data
+
+
 class SignInUser(APIView):
     def post(self, request):
         data = request.data
         if data['mobile'] != '' and len(data['mobile']) == 10 and re.match("[6-9][0-9]{9}", data['mobile']):
             if data['password'] != '' and len(data['password']) >= 8:
-                customer = primary.customers.find_one({"mobile": data["mobile"], "is_approved": True, "mobileverified": True, "status": True})
+                customer = primary.customers.find_one(
+                    {"mobile": data["mobile"], "is_approved": True, "mobileverified": True, "status": True})
                 if customer is not None:
                     checkPassword = check_password(data['password'], customer['password'])
                     if checkPassword:
