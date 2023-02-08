@@ -187,7 +187,6 @@ class ChangePassword(APIView):
     def post(self, request):
         token, payload = authenticate(request)
         if token:
-            print("token", token)
             data = request.data
             if len(data['mobile']) == 10 and re.match("[6-9][0-9]{9}", data['mobile']):
                 if len(data["password"]) >= 8 and data["password"] != '':
@@ -202,5 +201,48 @@ class ChangePassword(APIView):
                     return badRequest("Invalid password lenght to small, Please try again.")
             else:
                 return badRequest("Invalid mobile number, Please try again.")
+        else:
+            return unauthorisedRequest()
+
+
+class getProfile(APIView):
+    def get(self, request):
+        token, payload = authenticate(request)
+        if token:
+            userData = primary.customers.find_one(
+                {"_id": payload["id"], "mobileverified": True, "is_approved": True, "status": True},
+                {"password": 0, "ip_address": 0, "hostname": 0, "otpVerifyKey": 0})
+            if userData is not None:
+                return onSuccess("User profile!", userData)
+            else:
+                return badRequest("User not found")
+        else:
+            return unauthorisedRequest()
+
+
+class setProfile(APIView):
+    def post(self, request):
+        token, payload = authenticate(request)
+        if token:
+            data = request.data
+            userData = primary.customers.find_one(
+                {"_id": payload["id"], "mobileverified": True, "is_approved": True, "status": True},
+                {"password": 0, "ip_address": 0, "hostname": 0, "otpVerifyKey": 0})
+            if userData is not None:
+                obj = {"$set": {
+                    "name": data["name"],
+                    "company_name": data["company_name"]
+                }
+                }
+                updateUser = primary.customers.find_one_and_update({"_id": payload["id"]}, obj)
+                if updateUser:
+                    updatedUser = primary.customers.find_one(
+                        {"_id": payload["id"]},
+                        {"password": 0, "ip_address": 0, "hostname": 0, "otpVerifyKey": 0})
+                    return onSuccess("Profile updated successfully!", updatedUser)
+                else:
+                    return badRequest("Invalid data to update profile, Please try again.")
+            else:
+                return badRequest("User not found")
         else:
             return unauthorisedRequest()
