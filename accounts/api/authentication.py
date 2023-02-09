@@ -7,14 +7,16 @@ from core.response import *
 from pymongo import MongoClient
 
 primary = MongoClient(config('MONGO_CONNECTION_STRING')).scalelotcrmapp
+secondary = MongoClient(config('MONGO_CONNECTION_STRING'))
 
 
-def create_access_token(id, db):
+def create_access_token(id, db, roleid):
     payload = {
         "id": id,
-        "exp": datetime.datetime.utcnow() + datetime.timedelta(minutes=60),
+        "exp": datetime.datetime.utcnow() + datetime.timedelta(minutes=43200),
         "iat": datetime.datetime.utcnow(),
-        "ext": db
+        "ext": db,
+        "roleid": roleid
     }
     return jwt.encode(payload, config('SECRET_KEY'), algorithm='HS256')
 
@@ -47,3 +49,30 @@ def authenticate(request):
         return user, payload
     else:
         return False, None
+
+
+def getPermission(roleid, modelname, permissiontype, secondarydb):
+    result = secondary[secondarydb].permissions.find_one({"roleid": roleid})
+    if result is not None:
+        permission = result["permission"]
+        for i in permission:
+            if i["collectionName"] == modelname:
+                if permissiontype == "insertUpdate":
+                    if i["insertUpdate"]:
+                        return True
+                    else:
+                        return False
+                if permissiontype == "view":
+                    if i["view"]:
+                        return True
+                    else:
+                        return False
+                if permissiontype == "delete":
+                    if i["delete"]:
+                        return True
+                    else:
+                        return False
+            else:
+                return False
+    else:
+        return False

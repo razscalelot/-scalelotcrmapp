@@ -10,4 +10,6 @@ urlpatterns = [
     path('changepassword', ChangePassword.as_view(), name="ChangePassword"),
     path('getprofile', getProfile.as_view(), name="getProfile"),
     path('setprofile', setProfile.as_view(), name="setProfile"),
+
+    path('role', Roles.as_view(), name="Staff")
 ]

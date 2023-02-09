@@ -1,5 +1,5 @@
 from django.contrib.auth.hashers import make_password, check_password
-from accounts.api.authentication import createPassword, create_access_token, authenticate, getPermission
+from accounts.api.authentication import createPassword, create_access_token, authenticate
 from rest_framework.views import APIView
 from core.response import *
 from accounts.api.serializers import *
@@ -55,32 +55,24 @@ class SignUpUser(APIView):
                             if response["Status"] == "Success":
                                 createSecondaryDB = 'scalelot_' + data['mobile']
                                 secondaryDB = secondary[createSecondaryDB]
-                                collectionsName = ["roles", "permissions", "users"]
-                                for collection in collectionsName:
-                                    secondaryDB.create_collection(collection)
-                                roleData = {
-                                    "_id": uuid.uuid4().hex,
-                                    "name": "Admin",
-                                    "status": True
-                                }
-                                getRole = secondaryDB.roles.insert_one(roleData).inserted_id
                                 permissionsData = [
                                     {
+                                        "collectionName": "roles",
+                                        "insertUpdate": True,
+                                        "delete": True,
+                                        "view": True,
                                         "_id": uuid.uuid4().hex,
-                                        "roleid": getRole,
-                                        "permission": [{
-                                            "collectionName": "roles",
-                                            "insertUpdate": True,
-                                            "delete": True,
-                                            "view": True,
-                                        }],
-                                        "updatedBy": "",
-                                        "createdBy": ""
-                                    }
+                                    },
+                                    {
+                                        "collectionName": "permissions",
+                                        "insertUpdate": True,
+                                        "delete": True,
+                                        "view": True,
+                                        "_id": uuid.uuid4().hex,
+                                    },
                                 ]
                                 secondaryDB.permissions.insert_many(permissionsData)
                                 obj["otpVerifyKey"] = response["Details"]
-                                obj["roleid"] = getRole
                                 primary.customers.insert_one(obj)
                                 return onSuccess("Otp send successfull", {"password": password, "response": response})
                             else:
@@ -153,8 +145,7 @@ class SignInUser(APIView):
                         if checkPassword:
                             getSecondryDB = secondary.get_database('scalelot_' + data["mobile"])
                             if getSecondryDB != '':
-                                token = create_access_token(customer['_id'], 'scalelot_' + data["mobile"],
-                                                            customer["roleid"])
+                                token = create_access_token(customer['_id'], 'scalelot_' + data["mobile"])
                                 return onSuccess("Login successfull", token)
                             else:
                                 return badRequest("Invalid mobile or password, Please try again.")
@@ -253,90 +244,5 @@ class setProfile(APIView):
                     return badRequest("Invalid data to update profile, Please try again.")
             else:
                 return badRequest("User not found")
-        else:
-            return unauthorisedRequest()
-
-
-class Roles(APIView):
-    def get(self, request):
-        token, payload = authenticate(request)
-        if token:
-            data = request.data
-            havePermission = getPermission(payload["roleid"], "roles", 'view', payload["ext"])
-            if havePermission:
-                rolesData = secondary[payload["ext"]].roles.find({}).skip(data["limit"] * (data["page"] - 1)).limit(
-                    data["limit"]).sort("_id", 1)
-                return onSuccess("Roles list", list(rolesData))
-            else:
-                return unauthorisedRequest()
-        else:
-            return unauthorisedRequest()
-
-    def post(self, request):
-        token, payload = authenticate(request)
-        if token:
-            data = request.data
-            havePermission = getPermission(payload["roleid"], "roles", 'insertUpdate', payload["ext"])
-            if havePermission:
-                if data["id"] == '':
-                    if data["name"] != '':
-                        secondaryDB = secondary[payload["ext"]]
-                        existingRole = secondaryDB.roles.find_one({"name": data["name"]})
-                        if not existingRole:
-                            obj = {
-                                "_id": uuid.uuid4().hex,
-                                "name": data["name"],
-                                "status": True
-                            }
-                            createRole = secondary[payload["ext"]].roles.insert_one(obj).inserted_id
-                            if createRole:
-                                createdRole = secondary[payload["ext"]].roles.find_one({"_id": createRole})
-                                permissionsData = [
-                                    {
-                                        "_id": uuid.uuid4().hex,
-                                        "roleid": createRole,
-                                        "permission": data["permission"],
-                                        "updatedBy": payload["id"],
-                                        "createdBy": payload["id"]
-                                    }
-                                ]
-                                secondaryDB.permissions.insert_many(permissionsData)
-                                return onSuccess("Role created successfully!", createdRole)
-                            else:
-                                return badRequest("Invalid data to add role, Please try again.")
-                        else:
-                            return badRequest("Role name already exist, Please try again.")
-                    else:
-                        return badRequest("Invalid role name, Please try again.")
-                else:
-                    if data["name"] != '':
-                        secondaryDB = secondary[payload["ext"]]
-                        existingRole = secondaryDB.roles.find_one({"_id": data["id"]})
-                        if existingRole:
-                            obj = {"$set": {
-                                "name": data["name"],
-                                "status": True
-                            }
-                            }
-                            updateRole = secondaryDB.roles.find_one_and_update({"_id": data["id"]}, obj)
-                            if updateRole:
-                                updatedRole = secondaryDB.roles.find_one({"_id": updateRole["_id"]})
-                                permissionsData = [
-                                    {"$set": {
-                                        "permission": data["permission"],
-                                        "updatedBy": payload["id"]
-                                    }
-                                    }
-                                ]
-                                secondaryDB.permissions.find_one_and_update({"roleid": data["id"]}, permissionsData)
-                                return onSuccess("Role updated successfully!", updatedRole)
-                            else:
-                                pass
-                        else:
-                            return badRequest("Invalid data to update role, Please try again.")
-                    else:
-                        return badRequest("Invalid role name, Please try again.")
-            else:
-                return unauthorisedRequest()
         else:
             return unauthorisedRequest()
