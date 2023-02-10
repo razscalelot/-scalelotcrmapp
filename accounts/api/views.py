@@ -55,7 +55,7 @@ class SignUpUser(APIView):
                             if response["Status"] == "Success":
                                 createSecondaryDB = 'scalelot_' + data['mobile']
                                 secondaryDB = secondary[createSecondaryDB]
-                                collectionsName = ["roles", "permissions", "users"]
+                                collectionsName = ["roles", "permissions", "staffs"]
                                 for collection in collectionsName:
                                     secondaryDB.create_collection(collection)
                                 roleData = {
@@ -64,18 +64,28 @@ class SignUpUser(APIView):
                                     "status": True
                                 }
                                 getRole = secondaryDB.roles.insert_one(roleData).inserted_id
+                                permission = [
+                                    {
+                                        "collectionName": "roles",
+                                        "create": True,
+                                        "edit": True,
+                                        "delete": True,
+                                        "view": True,
+                                    }, {
+                                        "collectionName": "staffs",
+                                        "create": True,
+                                        "edit": True,
+                                        "delete": True,
+                                        "view": True,
+                                    }
+                                ]
                                 permissionsData = [
                                     {
                                         "_id": uuid.uuid4().hex,
                                         "roleid": getRole,
-                                        "permission": [{
-                                            "collectionName": "roles",
-                                            "insertUpdate": True,
-                                            "delete": True,
-                                            "view": True,
-                                        }],
+                                        "permission": permission,
                                         "updatedBy": "",
-                                        "createdBy": ""
+                                        "createdBy": obj["_id"]
                                     }
                                 ]
                                 secondaryDB.permissions.insert_many(permissionsData)
@@ -276,9 +286,9 @@ class Roles(APIView):
         token, payload = authenticate(request)
         if token:
             data = request.data
-            havePermission = getPermission(payload["roleid"], "roles", 'insertUpdate', payload["ext"])
-            if havePermission:
-                if data["id"] == '':
+            if data["id"] == '':
+                havePermission = getPermission(payload["roleid"], "roles", 'create', payload["ext"])
+                if havePermission:
                     if data["name"] != '':
                         secondaryDB = secondary[payload["ext"]]
                         existingRole = secondaryDB.roles.find_one({"name": data["name"]})
@@ -309,6 +319,10 @@ class Roles(APIView):
                     else:
                         return badRequest("Invalid role name, Please try again.")
                 else:
+                    return unauthorisedRequest()
+            else:
+                havePermission = getPermission(payload["roleid"], "roles", 'edit', payload["ext"])
+                if havePermission:
                     if data["name"] != '':
                         secondaryDB = secondary[payload["ext"]]
                         existingRole = secondaryDB.roles.find_one({"_id": data["id"]})
@@ -336,7 +350,26 @@ class Roles(APIView):
                             return badRequest("Invalid data to update role, Please try again.")
                     else:
                         return badRequest("Invalid role name, Please try again.")
+                else:
+                    return unauthorisedRequest()
+        else:
+            return unauthorisedRequest()
+
+
+    def delete(self, request):
+        token, payload = authenticate(request)
+        if token:
+            data = request.data
+            havePermission = getPermission(payload["roleid"], "roles", 'delete', payload["ext"])
+            if havePermission:
+                secondaryDB = secondary[payload["ext"]]
+                secondaryDB.roles.find_one_and_delete({"_id": data["id"]})
+                secondaryDB.permissions.find_one_and_delete({"roleid": data["id"]})
+                return onSuccess("Roles deleted successfully", 1)
             else:
                 return unauthorisedRequest()
         else:
             return unauthorisedRequest()
+
+
+# class Staff()

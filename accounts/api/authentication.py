@@ -57,8 +57,13 @@ def getPermission(roleid, modelname, permissiontype, secondarydb):
         permission = result["permission"]
         for i in permission:
             if i["collectionName"] == modelname:
-                if permissiontype == "insertUpdate":
-                    if i["insertUpdate"]:
+                if permissiontype == "create":
+                    if i["create"]:
+                        return True
+                    else:
+                        return False
+                if permissiontype == "edit":
+                    if i["edit"]:
                         return True
                     else:
                         return False
