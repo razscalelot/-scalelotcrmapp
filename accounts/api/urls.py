@@ -8,8 +8,11 @@ urlpatterns = [
     path('verifymobile', VerifyMobile.as_view(), name="VerifyMobile"),
     path('forgotpassword', ForgotPassword.as_view(), name="ForgotPassword"),
     path('changepassword', ChangePassword.as_view(), name="ChangePassword"),
-    path('getprofile', getProfile.as_view(), name="getProfile"),
-    path('setprofile', setProfile.as_view(), name="setProfile"),
+    path('getprofile', GetProfile.as_view(), name="GetProfile"),
+    path('setprofile', SetProfile.as_view(), name="SetProfile"),
 
-    path('role', Roles.as_view(), name="Staff")
+    path('role', Roles.as_view(), name="Roles"),
+    path('user', Users.as_view(), name="Users"),
+    path('department', Departments.as_view(), name="Departments"),
+    path('jobwork', JobWorks.as_view(), name="JobWorks"),
 ]

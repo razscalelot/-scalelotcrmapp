@@ -5,7 +5,6 @@ from core.response import *
 from accounts.api.serializers import *
 from decouple import config
 from pymongo import MongoClient
-from bson.objectid import ObjectId
 from datetime import datetime
 import uuid
 import socket
@@ -21,81 +20,57 @@ headers = {
 
 
 class SignUpUser(APIView):
-    def post(self, request) -> dict:
+    def post(self, request):
         data = request.data
-        if data['name'] != '' and len(data['name']) >= 3:
+        if data['firstname'] != '' and len(data['firstname']) >= 3:
             if len(data['mobile']) == 10 and re.match("[6-9][0-9]{9}", data['mobile']):
                 if data['email'] != '' and re.match("^[a-zA-Z0-9-_]+@[a-zA-Z0-9]+\.[a-z]{1,3}$", data["email"]):
                     if data['company_name'] != '':
-                        existingUser = primary.customers.find_one(
-                            {'$or': [{"mobile": data["mobile"]}, {"email": data["email"]}]})
+                        existingUser = primary.users.find_one({'$or': [{"mobile": data["mobile"]}, {"email": data["email"]}]})
                         if not existingUser:
-                            password = createPassword()
-                            hostname = socket.gethostname()
-                            ip_address = socket.gethostbyname(hostname)
-                            obj = {
-                                "_id": uuid.uuid4().hex,
-                                "name": data['name'],
-                                "mobile": data['mobile'],
-                                "password": make_password(password, config("PASSWORD_KEY")),
-                                "email": data['email'],
-                                "company_name": data['company_name'],
-                                "is_demo": True,
-                                "is_approved": True,
-                                "status": True,
-                                "mobileverified": False,
-                                "free_trial": 15,
-                                "ip_address": ip_address,
-                                "hostname": hostname,
-                                "created_at": datetime.now()
-                            }
-                            url = config('FACTOR_URL') + (data['mobile']) + '/AUTOGEN'
+                            url = config('FACTOR_URL') + data['mobile'] + '/AUTOGEN'
                             otpSend = requests.get(url, headers)
                             response = json.loads(otpSend.text)
                             if response["Status"] == "Success":
-                                createSecondaryDB = 'scalelot_' + data['mobile']
-                                secondaryDB = secondary[createSecondaryDB]
-                                collectionsName = ["roles", "permissions", "staffs"]
-                                for collection in collectionsName:
-                                    secondaryDB.create_collection(collection)
-                                roleData = {
+                                customerData = {
                                     "_id": uuid.uuid4().hex,
-                                    "name": "Admin",
-                                    "status": True
+                                    "db": "",
+                                    "mobile": data['mobile'],
+                                    "email": data['email'],
+                                    "status": True,
+                                    "is_demo": True,
+                                    "is_approved": True,
+                                    "is_active": False,
+                                    "createdAt": datetime.now(),
+                                    "updatedAt": "",
+                                    "createdBy": "",
+                                    "updatedBy": "",
                                 }
-                                getRole = secondaryDB.roles.insert_one(roleData).inserted_id
-                                permission = [
-                                    {
-                                        "collectionName": "roles",
-                                        "create": True,
-                                        "edit": True,
-                                        "delete": True,
-                                        "view": True,
-                                    }, {
-                                        "collectionName": "staffs",
-                                        "create": True,
-                                        "edit": True,
-                                        "delete": True,
-                                        "view": True,
-                                    }
-                                ]
-                                permissionsData = [
-                                    {
-                                        "_id": uuid.uuid4().hex,
-                                        "roleid": getRole,
-                                        "permission": permission,
-                                        "updatedBy": "",
-                                        "createdBy": obj["_id"]
-                                    }
-                                ]
-                                secondaryDB.permissions.insert_many(permissionsData)
-                                obj["otpVerifyKey"] = response["Details"]
-                                obj["roleid"] = getRole
-                                primary.customers.insert_one(obj)
-                                return onSuccess("Otp send successfull", {"password": password, "response": response})
+                                getCustomerID = primary.customers.insert_one(customerData).inserted_id
+                                obj = {
+                                    "_id": uuid.uuid4().hex,
+                                    "firstname": data['firstname'],
+                                    "password": make_password(data["password"], config("PASSWORD_KEY")),
+                                    "mobile": data['mobile'],
+                                    "email": data['email'],
+                                    "profile_pic": "",
+                                    "roleid": "",
+                                    "departments": [{"department": "", "jobwork": ""}],
+                                    "company_name": data['company_name'],
+                                    "parentid": getCustomerID,
+                                    "otpVerifyKey": response["Details"],
+                                    "status": True,
+                                    "is_approved": True,
+                                    "is_active": False,
+                                    "createdAt": datetime.now(),
+                                    "updatedAt": "",
+                                    "createdBy": "",
+                                    "updatedBy": "",
+                                }
+                                primary.users.insert_one(obj)
+                                return onSuccess("Otp send successfull", response)
                             else:
-                                return badRequest(
-                                    "Something went wrong, unable to send otp for given mobile number, please try again.")
+                                return badRequest("Something went wrong, unable to send otp for given mobile number, please try again.")
                         else:
                             return badRequest("User already exist with same mobile or email, Please try again.")
                     else:
@@ -105,21 +80,70 @@ class SignUpUser(APIView):
             else:
                 return badRequest("Invalid mobile number, Please try again.")
         else:
-            return badRequest("Invalid your name, Please try again.")
+            return badRequest("Invalid first name, Please try again.")
 
 
 class VerifyOtp(APIView):
     def post(self, request):
         data = request.data
         if data["key"] != '' and data["otp"] != '' and data["mobile"]:
-            userData = primary.customers.find_one({"mobile": data["mobile"], "otpVerifyKey": data["key"]})
+            userData = primary.users.find_one({"mobile": data["mobile"], "otpVerifyKey": data["key"]})
             if userData:
                 url = config("FACTOR_URL") + "VERIFY/" + data["key"] + "/" + data["otp"]
                 otpSend = requests.get(url, headers)
                 response = json.loads(otpSend.text)
                 if response["Status"] == "Success":
-                    primary.customers.find_one_and_update({"_id": userData["_id"]},
-                                                          {"$set": {"mobileverified": True}})
+                    createSecondaryDB = 'scalelot_' + data['mobile']
+                    primary.customers.find_one_and_update({"_id": userData["parentid"]}, {"$set": {"db": createSecondaryDB}})
+                    getUserDB = primary.customers.find_one({"_id": userData["parentid"]})
+                    secondaryDB = secondary[getUserDB["db"]]
+                    collectionsName = ["roles", "permissions", "departments", "jobworks"]
+                    for collection in collectionsName:
+                        secondaryDB.create_collection(collection)
+                    roleData = {
+                        "_id": uuid.uuid4().hex,
+                        "name": "Admin",
+                        "status": True
+                    }
+                    getRole = secondaryDB.roles.insert_one(roleData).inserted_id
+                    permission = [
+                        {
+                            "collectionName": "roles",
+                            "create": True,
+                            "edit": True,
+                            "delete": True,
+                            "view": True,
+                        }, {
+                            "collectionName": "users",
+                            "create": True,
+                            "edit": True,
+                            "delete": True,
+                            "view": True,
+                        }, {
+                            "collectionName": "departments",
+                            "create": True,
+                            "edit": True,
+                            "delete": True,
+                            "view": True,
+                        }, {
+                            "collectionName": "jobworks",
+                            "create": True,
+                            "edit": True,
+                            "delete": True,
+                            "view": True,
+                        }
+                    ]
+                    permissionsData = [
+                        {
+                            "_id": uuid.uuid4().hex,
+                            "roleid": getRole,
+                            "permission": permission,
+                            "updatedBy": "",
+                            "createdBy": userData["_id"]
+                        }
+                    ]
+                    secondaryDB.permissions.insert_many(permissionsData)
+                    primary.users.find_one_and_update({"_id": userData["_id"]}, {"$set": {"roleid": getRole, "mobileverified": True}})
                     return onSuccess("User mobile number verified successfully!", 1)
                 else:
                     return badRequest("Invalid OTP, please try again")
@@ -133,18 +157,20 @@ class VerifyMobile(APIView):
     def post(self, request):
         data = request.data
         if len(data['mobile']) == 10 and re.match("[6-9][0-9]{9}", data['mobile']):
-            customer = primary.customers.find_one({"mobile": data["mobile"], "is_approved": True, "status": True})
-            if customer is not None:
-                url = config('FACTOR_URL') + (data['mobile']) + '/AUTOGEN'
-                otpSend = requests.get(url, headers)
-                response = json.loads(otpSend.text)
-                if response["Status"] == "Success":
-                    primary.customers.find_one_and_update({"_id": customer["_id"]},
-                                                          {"$set": {"otpVerifyKey": response["Details"]}})
-                    return onSuccess("Otp send successfull", response)
+            userData = primary.users.find_one({"mobile": data["mobile"], "is_approved": True, "status": True})
+            if userData is not None:
+                if not userData["mobileverified"]:
+                    url = config('FACTOR_URL') + (data['mobile']) + '/AUTOGEN'
+                    otpSend = requests.get(url, headers)
+                    response = json.loads(otpSend.text)
+                    if response["Status"] == "Success":
+                        primary.users.find_one_and_update({"_id": userData["_id"]}, {"$set": {"otpVerifyKey": response["Details"]}})
+                        return onSuccess("Otp send successfully", response)
+                    else:
+                        return badRequest(
+                            "Something went wrong, unable to send otp for given mobile number, please try again.")
                 else:
-                    return badRequest(
-                        "Something went wrong, unable to send otp for given mobile number, please try again.")
+                    return badRequest("This mobile number is already register with us, Please try again.")
             else:
                 return badRequest("This mobile number is not register with us, Please try again.")
         else:
@@ -154,20 +180,16 @@ class VerifyMobile(APIView):
 class SignInUser(APIView):
     def post(self, request):
         data = request.data
-        if data['mobile'] != '' and len(data['mobile']) == 10 and re.match("[6-9][0-9]{9}", data['mobile']):
+        if (data['username'] != '' and len(data['username']) == 10 and re.match("[6-9][0-9]{9}", data['username'])) or (data['username'] != '' and re.match("^[a-zA-Z0-9-_]+@[a-zA-Z0-9]+\.[a-z]{1,3}$", data["mobile"])):
             if data['password'] != '' and len(data['password']) >= 8:
-                customer = primary.customers.find_one({"mobile": data["mobile"], "is_approved": True, "status": True})
-                if customer is not None:
-                    if customer["mobileverified"]:
-                        checkPassword = check_password(data['password'], customer['password'])
+                userData = primary.users.find_one({"$or": [{"mobile": data["username"]}, {"email": data["username"]}], "status": True, "mobileverified": True})
+                if userData is not None:
+                    if userData["mobileverified"]:
+                        checkPassword = check_password(data['password'], userData['password'])
                         if checkPassword:
-                            getSecondryDB = secondary.get_database('scalelot_' + data["mobile"])
-                            if getSecondryDB != '':
-                                token = create_access_token(customer['_id'], 'scalelot_' + data["mobile"],
-                                                            customer["roleid"])
-                                return onSuccess("Login successfull", token)
-                            else:
-                                return badRequest("Invalid mobile or password, Please try again.")
+                            primary.users.update_one({"_id": userData["_id"]}, {"$set": {"is_active": True}})
+                            token = create_access_token(userData['_id'], userData["roleid"])
+                            return onSuccess("Login successfully", token)
                         else:
                             return badRequest("Invalid mobile or password, Please try again.")
                     else:
@@ -184,18 +206,16 @@ class ForgotPassword(APIView):
     def post(self, request):
         data = request.data
         if len(data['mobile']) == 10 and re.match("[6-9][0-9]{9}", data['mobile']):
-            customer = primary.customers.find_one({"mobile": data["mobile"], "status": True})
-            if customer is not None:
+            userData = primary.users.find_one({"mobile": data["mobile"], "status": True, "mobileverified": True})
+            if userData is not None:
                 url = config('FACTOR_URL') + (data['mobile']) + '/AUTOGEN'
                 otpSend = requests.get(url, headers)
                 response = json.loads(otpSend.text)
                 if response["Status"] == "Success":
-                    primary.customers.find_one_and_update({"_id": customer["_id"]},
-                                                          {"$set": {"otpVerifyKey": response["Details"]}})
+                    primary.users.find_one_and_update({"_id": userData["_id"]}, {"$set": {"otpVerifyKey": response["Details"]}})
                     return onSuccess("Otp send successfull", response)
                 else:
-                    return badRequest(
-                        "Something went wrong, unable to send otp for given mobile number, please try again.")
+                    return badRequest("Something went wrong, unable to send otp for given mobile number, please try again.")
             else:
                 return badRequest("This mobile number is not register with us, Please try again.")
         else:
@@ -204,15 +224,14 @@ class ForgotPassword(APIView):
 
 class ChangePassword(APIView):
     def post(self, request):
-        token, payload = authenticate(request)
+        token = authenticate(request)
         if token:
             data = request.data
             if len(data['mobile']) == 10 and re.match("[6-9][0-9]{9}", data['mobile']):
                 if len(data["password"]) >= 8 and data["password"] != '':
-                    customer = primary.customers.find_one({"mobile": data["mobile"], "status": True})
-                    if customer is not None:
-                        primary.customers.find_one_and_update({"_id": customer["_id"]}, {
-                            "$set": {"password": make_password(data["password"], config("PASSWORD_KEY"))}})
+                    userData = primary.users.find_one({"mobile": data["mobile"], "status": True, "mobileverified": True})
+                    if userData is not None:
+                        primary.users.find_one_and_update({"_id": userData["_id"]}, {"$set": {"password": make_password(data["password"], config("PASSWORD_KEY"))}})
                         return onSuccess("User password changed successfully!", 1)
                     else:
                         return badRequest("This mobile number is not register with us, Please try again.")
@@ -224,13 +243,12 @@ class ChangePassword(APIView):
             return unauthorisedRequest()
 
 
-class getProfile(APIView):
+class GetProfile(APIView):
     def get(self, request):
-        token, payload = authenticate(request)
+        token = authenticate(request)
         if token:
-            userData = primary.customers.find_one(
-                {"_id": payload["id"], "mobileverified": True, "is_approved": True, "status": True},
-                {"password": 0, "ip_address": 0, "hostname": 0, "otpVerifyKey": 0})
+            print("token", token)
+            userData = primary.users.find_one({"_id": token["id"], "mobileverified": True, "is_approved": True, "status": True}, {"password": 0, "roleid": 0, "parentid": 0, "otpVerifyKey": 0, "createdBy": 0, "updatedBy": 0, "mobileverified": 0, "is_approved": 0})
             if userData is not None:
                 return onSuccess("User profile!", userData)
             else:
@@ -239,25 +257,23 @@ class getProfile(APIView):
             return unauthorisedRequest()
 
 
-class setProfile(APIView):
+class SetProfile(APIView):
     def post(self, request):
-        token, payload = authenticate(request)
+        token = authenticate(request)
         if token:
             data = request.data
-            userData = primary.customers.find_one(
-                {"_id": payload["id"], "mobileverified": True, "is_approved": True, "status": True},
-                {"password": 0, "ip_address": 0, "hostname": 0, "otpVerifyKey": 0})
+            userData = primary.users.find_one({"_id": token["id"], "mobileverified": True, "is_approved": True, "status": True})
             if userData is not None:
                 obj = {"$set": {
-                    "name": data["name"],
+                    "firstname": data["firstname"],
+                    "lastname": data["lastname"],
+                    "profile_pic": "",
                     "company_name": data["company_name"]
                 }
                 }
-                updateUser = primary.customers.find_one_and_update({"_id": payload["id"]}, obj)
+                updateUser = primary.users.find_one_and_update({"_id": token["id"]}, obj)
                 if updateUser:
-                    updatedUser = primary.customers.find_one(
-                        {"_id": payload["id"]},
-                        {"password": 0, "ip_address": 0, "hostname": 0, "otpVerifyKey": 0})
+                    updatedUser = primary.users.find_one({"_id": token["id"]}, {"password": 0, "roleid": 0, "parentid": 0, "otpVerifyKey": 0, "createdBy": 0, "updatedBy": 0, "mobileverified": 0, "is_approved": 0})
                     return onSuccess("Profile updated successfully!", updatedUser)
                 else:
                     return badRequest("Invalid data to update profile, Please try again.")
@@ -269,13 +285,24 @@ class setProfile(APIView):
 
 class Roles(APIView):
     def get(self, request):
-        token, payload = authenticate(request)
+        token = authenticate(request)
         if token:
-            data = request.data
-            havePermission = getPermission(payload["roleid"], "roles", 'view', payload["ext"])
+            page = int(request.GET.get("page", 1))
+            limit = int(request.GET.get("limit", 5))
+            getUser = primary.users.find_one({"_id": token["id"]})
+            getGecondaryDB = primary.customers.find_one({"_id": getUser["parentid"]})
+            secondaryDB = secondary[getGecondaryDB['db']]
+            havePermission = getPermission(token["roleid"], "roles", 'view', getGecondaryDB['db'])
             if havePermission:
-                rolesData = secondary[payload["ext"]].roles.find({}).skip(data["limit"] * (data["page"] - 1)).limit(
-                    data["limit"]).sort("_id", 1)
+                id = request.GET.get("id")
+                if id:
+                    try:
+                        rolesData = secondaryDB.roles.find_one({"_id": id})
+                        return onSuccess("Roles list", rolesData)
+                    except:
+                        return badRequest("Invalid role id, Please try again.")
+
+                rolesData = secondaryDB.roles.find({}).skip(limit * (page - 1)).limit(limit).sort("_id", 1)
                 return onSuccess("Roles list", list(rolesData))
             else:
                 return unauthorisedRequest()
@@ -283,31 +310,36 @@ class Roles(APIView):
             return unauthorisedRequest()
 
     def post(self, request):
-        token, payload = authenticate(request)
+        token = authenticate(request)
         if token:
             data = request.data
+            getUser = primary.users.find_one({"_id": token["id"]})
+            getGecondaryDB = primary.customers.find_one({"_id": getUser["parentid"]})
+            secondaryDB = secondary[getGecondaryDB['db']]
             if data["id"] == '':
-                havePermission = getPermission(payload["roleid"], "roles", 'create', payload["ext"])
+                havePermission = getPermission(token["roleid"], "roles", 'create', getGecondaryDB["db"])
                 if havePermission:
                     if data["name"] != '':
-                        secondaryDB = secondary[payload["ext"]]
                         existingRole = secondaryDB.roles.find_one({"name": data["name"]})
                         if not existingRole:
                             obj = {
                                 "_id": uuid.uuid4().hex,
                                 "name": data["name"],
-                                "status": True
+                                "status": True,
+                                "createdAt": datetime.now(),
+                                "createdBy": token["id"]
                             }
-                            createRole = secondary[payload["ext"]].roles.insert_one(obj).inserted_id
+                            createRole = secondaryDB.roles.insert_one(obj).inserted_id
                             if createRole:
-                                createdRole = secondary[payload["ext"]].roles.find_one({"_id": createRole})
+                                createdRole = secondaryDB.roles.find_one({"_id": createRole})
                                 permissionsData = [
                                     {
                                         "_id": uuid.uuid4().hex,
                                         "roleid": createRole,
                                         "permission": data["permission"],
-                                        "updatedBy": payload["id"],
-                                        "createdBy": payload["id"]
+                                        "status": True,
+                                        "createdAt": datetime.now(),
+                                        "createdBy": token["id"]
                                     }
                                 ]
                                 secondaryDB.permissions.insert_many(permissionsData)
@@ -321,15 +353,16 @@ class Roles(APIView):
                 else:
                     return unauthorisedRequest()
             else:
-                havePermission = getPermission(payload["roleid"], "roles", 'edit', payload["ext"])
+                havePermission = getPermission(token["roleid"], "roles", 'edit', getGecondaryDB["db"])
                 if havePermission:
                     if data["name"] != '':
-                        secondaryDB = secondary[payload["ext"]]
                         existingRole = secondaryDB.roles.find_one({"_id": data["id"]})
                         if existingRole:
                             obj = {"$set": {
                                 "name": data["name"],
-                                "status": True
+                                "status": True,
+                                "updatedBy": token["id"],
+                                "updatedAt": datetime.now(),
                             }
                             }
                             updateRole = secondaryDB.roles.find_one_and_update({"_id": data["id"]}, obj)
@@ -338,7 +371,8 @@ class Roles(APIView):
                                 permissionsData = [
                                     {"$set": {
                                         "permission": data["permission"],
-                                        "updatedBy": payload["id"]
+                                        "updatedBy": token["id"],
+                                        "updatedAt": datetime.now(),
                                     }
                                     }
                                 ]
@@ -355,14 +389,15 @@ class Roles(APIView):
         else:
             return unauthorisedRequest()
 
-
     def delete(self, request):
-        token, payload = authenticate(request)
+        token = authenticate(request)
         if token:
             data = request.data
-            havePermission = getPermission(payload["roleid"], "roles", 'delete', payload["ext"])
+            getUser = primary.users.find_one({"_id": token["id"]})
+            getGecondaryDB = primary.customers.find_one({"_id": getUser["parentid"]})
+            secondaryDB = secondary[getGecondaryDB['db']]
+            havePermission = getPermission(token["roleid"], "roles", 'delete', getGecondaryDB["db"])
             if havePermission:
-                secondaryDB = secondary[payload["ext"]]
                 secondaryDB.roles.find_one_and_delete({"_id": data["id"]})
                 secondaryDB.permissions.find_one_and_delete({"roleid": data["id"]})
                 return onSuccess("Roles deleted successfully", 1)
@@ -372,4 +407,332 @@ class Roles(APIView):
             return unauthorisedRequest()
 
 
-# class Staff()
+class Departments(APIView):
+    def get(self, request):
+        token = authenticate(request)
+        if token:
+            page = int(request.GET.get("page", 1))
+            limit = int(request.GET.get("limit", 5))
+            getUser = primary.users.find_one({"_id": token["id"]})
+            getGecondaryDB = primary.customers.find_one({"_id": getUser["parentid"]})
+            secondaryDB = secondary[getGecondaryDB['db']]
+            havePermission = getPermission(token["roleid"], "departments", 'view', getGecondaryDB["db"])
+            if havePermission:
+                id = request.GET.get("id")
+                if id:
+                    try:
+                        departmentssData = secondaryDB.departments.find_one({"_id": id})
+                        return onSuccess("Departments list", departmentssData)
+                    except:
+                        return badRequest("Invalid role id, Please try again.")
+
+                departmentssData = secondaryDB.departments.find({}).skip(limit * (page - 1)).limit(limit).sort("_id", 1)
+                return onSuccess("Departments list", list(departmentssData))
+            else:
+                return unauthorisedRequest()
+        else:
+            return unauthorisedRequest()
+
+    def post(self, request):
+        token = authenticate(request)
+        if token:
+            data = request.data
+            getUser = primary.users.find_one({"_id": token["id"]})
+            getGecondaryDB = primary.customers.find_one({"_id": getUser["parentid"]})
+            secondaryDB = secondary[getGecondaryDB['db']]
+            if data["id"] == '':
+                havePermission = getPermission(token["roleid"], "departments", 'create', getGecondaryDB["db"])
+                if havePermission:
+                    if data["name"] != '':
+                        existingDepartment = secondaryDB.departments.find_one({"name": data["name"]})
+                        if not existingDepartment:
+                            obj = {
+                                "_id": uuid.uuid4().hex,
+                                "name": data["name"],
+                                "status": True,
+                                "createdBy": token["id"],
+                                "createdAt": datetime.now(),
+                            }
+                            createDepartment = secondaryDB.departments.insert_one(obj).inserted_id
+                            if createDepartment:
+                                createdDepartment = secondaryDB.departments.find_one({"_id": createDepartment})
+                                return onSuccess("Department created successfully!", createdDepartment)
+                            else:
+                                return badRequest("Invalid data to add department, Please try again.")
+                        else:
+                            return badRequest("Department name already exist, Please try again.")
+                    else:
+                        return badRequest("Invalid department 0name, Please try again.")
+                else:
+                    return unauthorisedRequest()
+            else:
+                havePermission = getPermission(token["roleid"], "departments", 'edit', getGecondaryDB["db"])
+                if havePermission:
+                    if data["name"] != '':
+                        existingDepartment = secondaryDB.departments.find_one({"_id": data["id"]})
+                        if existingDepartment:
+                            obj = {"$set": {
+                                "name": data["name"],
+                                "updatedBy": token["id"],
+                                "updatedAt": datetime.now(),
+                            }
+                            }
+                            updateDepartment = secondaryDB.departments.find_one_and_update({"_id": data["id"]}, obj)
+                            if updateDepartment:
+                                updatedDepartment = secondaryDB.departments.find_one({"_id": updateDepartment["_id"]})
+                                return onSuccess("Departments updated successfully!", updatedDepartment)
+                            else:
+                                return badRequest("Invalid data to update departments, Please try again.")
+                        else:
+                            return badRequest("Invalid data to update departments, Please try again.")
+                    else:
+                        return badRequest("Invalid departments name, Please try again.")
+                else:
+                    return unauthorisedRequest()
+        else:
+            return unauthorisedRequest()
+
+    def delete(self, request):
+        token = authenticate(request)
+        if token:
+            data = request.data
+            getUser = primary.users.find_one({"_id": token["id"]})
+            getGecondaryDB = primary.customers.find_one({"_id": getUser["parentid"]})
+            secondaryDB = secondary[getGecondaryDB['db']]
+            havePermission = getPermission(token["roleid"], "departments", 'delete', getGecondaryDB["db"])
+            if havePermission:
+                secondaryDB.departments.find_one_and_delete({"_id": data["id"]})
+                return onSuccess("Departments deleted successfully", 1)
+            else:
+                return unauthorisedRequest()
+        else:
+            return unauthorisedRequest()
+
+
+class JobWorks(APIView):
+    def get(self, request):
+        token = authenticate(request)
+        if token:
+            page = int(request.GET.get("page", 1))
+            limit = int(request.GET.get("limit", 5))
+            getUser = primary.users.find_one({"_id": token["id"]})
+            getGecondaryDB = primary.customers.find_one({"_id": getUser["parentid"]})
+            secondaryDB = secondary[getGecondaryDB['db']]
+            havePermission = getPermission(token["roleid"], "jobworks", 'view', getGecondaryDB["db"])
+            if havePermission:
+                id = request.GET.get("id")
+                if id:
+                    try:
+                        jobworksData = secondaryDB.jobworks.find_one({"_id": id})
+                        return onSuccess("Job works list", jobworksData)
+                    except:
+                        return badRequest("Invalid job work id, Please try again.")
+
+                jobworksData = secondaryDB.jobworks.find({}).skip(limit * (page - 1)).limit(limit).sort("_id", 1)
+                return onSuccess("Job works list", list(jobworksData))
+            else:
+                return unauthorisedRequest()
+        else:
+            return unauthorisedRequest()
+
+    def post(self, request):
+        token = authenticate(request)
+        if token:
+            data = request.data
+            getUser = primary.users.find_one({"_id": token["id"]})
+            getGecondaryDB = primary.customers.find_one({"_id": getUser["parentid"]})
+            secondaryDB = secondary[getGecondaryDB['db']]
+            if data["id"] == '':
+                havePermission = getPermission(token["roleid"], "jobworks", 'create', getGecondaryDB["db"])
+                if havePermission:
+                    if data["name"] != '':
+                        existingJobwork = secondaryDB.jobworks.find_one({"name": data["name"]})
+                        if not existingJobwork:
+                            obj = {
+                                "_id": uuid.uuid4().hex,
+                                "name": data["name"],
+                                "status": True,
+                                "createdAt": datetime.now(),
+                                "createdBy": token["id"]
+                            }
+                            createJobwork = secondaryDB.jobworks.insert_one(obj).inserted_id
+                            if createJobwork:
+                                createdJobwork = secondaryDB.jobworks.find_one({"_id": createJobwork})
+                                return onSuccess("Job work created successfully!", createdJobwork)
+                            else:
+                                return badRequest("Invalid data to add job work, Please try again.")
+                        else:
+                            return badRequest("Job work name already exist, Please try again.")
+                    else:
+                        return badRequest("Invalid job work name, Please try again.")
+                else:
+                    return unauthorisedRequest()
+            else:
+                havePermission = getPermission(token["roleid"], "jobworks", 'edit', getGecondaryDB["db"])
+                if havePermission:
+                    if data["name"] != '':
+                        existingJobwork = secondaryDB.jobworks.find_one({"_id": data["id"]})
+                        if existingJobwork:
+                            obj = {"$set": {
+                                "name": data["name"],
+                                "updatedBy": token["id"],
+                                "updatedAt": datetime.now(),
+                            }
+                            }
+                            updateJobwork = secondaryDB.jobworks.find_one_and_update({"_id": data["id"]}, obj)
+                            if updateJobwork:
+                                updatedJobwork = secondaryDB.jobworks.find_one({"_id": updateJobwork["_id"]})
+                                return onSuccess("Job work updated successfully!", updatedJobwork)
+                            else:
+                                return badRequest("Invalid data to update job work, Please try again.")
+                        else:
+                            return badRequest("Invalid data to update job work, Please try again.")
+                    else:
+                        return badRequest("Invalid job work name, Please try again.")
+                else:
+                    return unauthorisedRequest()
+        else:
+            return unauthorisedRequest()
+
+    def delete(self, request):
+        token = authenticate(request)
+        if token:
+            data = request.data
+            getUser = primary.users.find_one({"_id": token["id"]})
+            getGecondaryDB = primary.customers.find_one({"_id": getUser["parentid"]})
+            secondaryDB = secondary[getGecondaryDB['db']]
+            havePermission = getPermission(token["roleid"], "jobworks", 'delete', getGecondaryDB["db"])
+            if havePermission:
+                secondaryDB.jobworks.find_one_and_delete({"_id": data["id"]})
+                return onSuccess("Job work deleted successfully", 1)
+            else:
+                return unauthorisedRequest()
+        else:
+            return unauthorisedRequest()
+
+
+class Users(APIView):
+    def get(self, request):
+        token = authenticate(request)
+        if token:
+            page = int(request.GET.get("page", 1))
+            limit = int(request.GET.get("limit", 5))
+            getUser = primary.users.find_one({"_id": token["id"]})
+            getGecondaryDB = primary.customers.find_one({"_id": getUser["parentid"]})
+            secondaryDB = secondary[getGecondaryDB['db']]
+            havePermission = getPermission(token["roleid"], "users", 'view', getGecondaryDB["db"])
+            if havePermission:
+                id = request.GET.get("id")
+                if id:
+                    try:
+                        usersData = primary.users.find_one({"_id": id})
+                        return onSuccess("Users list", usersData)
+                    except:
+                        return badRequest("Invalid user id, Please try again.")
+
+                usersData = primary.users.find({"parentid": getGecondaryDB["_id"]}).skip(limit * (page - 1)).limit(limit).sort("_id", 1)
+                return onSuccess("Users list", list(usersData))
+            else:
+                return unauthorisedRequest()
+        else:
+            return unauthorisedRequest()
+
+    def post(self, request):
+        token = authenticate(request)
+        if token:
+            data = request.data
+            getUser = primary.users.find_one({"_id": token["id"]})
+            getGecondaryDB = primary.customers.find_one({"_id": getUser["parentid"]})
+            secondaryDB = secondary[getGecondaryDB['db']]
+            if data["id"] == '':
+                havePermission = getPermission(token["roleid"], "users", 'create', getGecondaryDB["db"])
+                if havePermission:
+                    if data['firstname'] != '' and len(data['firstname']) >= 2:
+                        if data['lastname'] != '' and len(data['lastname']) >= 2:
+                            if data['email'] != '' and re.match("^[a-zA-Z0-9-_]+@[a-zA-Z0-9]+\.[a-z]{1,3}$", data["email"]):
+                                existingUser = primary.users.find_one({"$or": [{"firstname": data["firstname"]}, {"email": data["email"]}]}, {"mobile": data['mobile']})
+                                if not existingUser:
+                                    obj = {
+                                        "_id": uuid.uuid4().hex,
+                                        "firstname": data['firstname'],
+                                        "lastname": data['lastname'],
+                                        "mobile": data['mobile'],
+                                        "password": make_password(data["password"], config("PASSWORD_KEY")),
+                                        "email": data['email'],
+                                        "profile_pic": "",
+                                        "parentid": getGecondaryDB["_id"],
+                                        "roleid": data["roleid"],
+                                        "departments": data["departments"],
+                                        "status": True,
+                                        "is_active": False,
+                                        "createdAt": datetime.now(),
+                                        "createdBy": token["id"]
+                                    }
+                                    createUser = primary.users.insert_one(obj).inserted_id
+                                    if createUser:
+                                        createdUser = primary.users.find_one({"_id": createUser})
+                                        return onSuccess("User created successfully!", createdUser)
+                                    else:
+                                        return badRequest("Invalid data to add user, Please try again.")
+                                else:
+                                    return badRequest("User already exist, Please try again.")
+                            else:
+                                return badRequest("Invalid email id, Please try again.")
+                        else:
+                            return badRequest("Invalid last name, Please try again.")
+                    else:
+                        return badRequest("Invalid last name, Please try again.")
+                else:
+                    return unauthorisedRequest()
+            else:
+                havePermission = getPermission(token["roleid"], "users", 'edit', getGecondaryDB["db"])
+                if havePermission:
+                    if data['firstname'] != '' and len(data['firstname']) >= 2:
+                        if data['lastname'] != '' and len(data['lastname']) >= 2:
+                            if data['email'] != '' and re.match("^[a-zA-Z0-9-_]+@[a-zA-Z0-9]+\.[a-z]{1,3}$", data["email"]):
+                                existingUser = primary.users.find_one({"_id": data["id"]})
+                                if existingUser:
+                                    obj = {"$set": {
+                                        "firstname": data['firstname'],
+                                        "lastname": data['lastname'],
+                                        "mobile": data['mobile'],
+                                        "email": data['email'],
+                                        "profile_pic": "",
+                                        "roleid": data["roleid"],
+                                        "departments": data["departments"],
+                                        "updatedBy": token["id"],
+                                        "updatedAt": datetime.now(),
+                                    }
+                                    }
+                                    updateUser = primary.users.find_one_and_update({"_id": data["id"]}, obj)
+                                    if updateUser:
+                                        updatedUser = primary.users.find_one({"_id": updateUser["_id"]})
+                                        return onSuccess("User updated successfully!", updatedUser)
+                                    else:
+                                        return badRequest("Invalid data to update user, Please try again.")
+                            else:
+                                return badRequest("Invalid email id, Please try again.")
+                        else:
+                            return badRequest("Invalid last name, Please try again.")
+                    else:
+                        return badRequest("Invalid last name, Please try again.")
+                else:
+                    return unauthorisedRequest()
+        else:
+            return unauthorisedRequest()
+
+    def delete(self, request):
+        token = authenticate(request)
+        if token:
+            data = request.data
+            getUser = primary.users.find_one({"_id": token["id"]})
+            getGecondaryDB = primary.customers.find_one({"_id": getUser["parentid"]})
+            secondaryDB = secondary[getGecondaryDB['db']]
+            havePermission = getPermission(token["roleid"], "users", 'delete', getGecondaryDB["db"])
+            if havePermission:
+                primary.users.find_one_and_delete({"_id": data["id"]})
+                return onSuccess("User deleted successfully", 1)
+            else:
+                return unauthorisedRequest()
+        else:
+            return unauthorisedRequest()
