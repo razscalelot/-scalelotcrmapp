@@ -1,6 +1,6 @@
 from django.urls import path
-from accounts.api.views import *
+from manufacturing.api.views import *
 
 urlpatterns = [
-
+    path("customfields", CustomFields.as_view(), name="CustomFields")
 ]

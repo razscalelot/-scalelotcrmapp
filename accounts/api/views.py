@@ -1,5 +1,5 @@
 from django.contrib.auth.hashers import make_password, check_password
-from accounts.api.authentication import createPassword, create_access_token, authenticate, getPermission
+from accounts.api.authentication import create_access_token, authenticate, getPermission
 from rest_framework.views import APIView
 from core.response import *
 from accounts.api.serializers import *
@@ -97,9 +97,10 @@ class VerifyOtp(APIView):
                     primary.customers.find_one_and_update({"_id": userData["parentid"]}, {"$set": {"db": createSecondaryDB}})
                     getUserDB = primary.customers.find_one({"_id": userData["parentid"]})
                     secondaryDB = secondary[getUserDB["db"]]
-                    collectionsName = ["roles", "permissions", "departments", "jobworks"]
+                    collectionsName = ["roles", "permissions", "departments", "jobworks", "custom_fields", "users", "customers"]
                     for collection in collectionsName:
                         secondaryDB.create_collection(collection)
+
                     roleData = {
                         "_id": uuid.uuid4().hex,
                         "name": "Admin",
@@ -127,6 +128,18 @@ class VerifyOtp(APIView):
                             "view": True,
                         }, {
                             "collectionName": "jobworks",
+                            "create": True,
+                            "edit": True,
+                            "delete": True,
+                            "view": True,
+                        }, {
+                            "collectionName": "customfields",
+                            "create": True,
+                            "edit": True,
+                            "delete": True,
+                            "view": True,
+                        }, {
+                            "collectionName": "customers",
                             "create": True,
                             "edit": True,
                             "delete": True,
@@ -180,15 +193,16 @@ class VerifyMobile(APIView):
 class SignInUser(APIView):
     def post(self, request):
         data = request.data
-        if (data['username'] != '' and len(data['username']) == 10 and re.match("[6-9][0-9]{9}", data['username'])) or (data['username'] != '' and re.match("^[a-zA-Z0-9-_]+@[a-zA-Z0-9]+\.[a-z]{1,3}$", data["mobile"])):
+        if (data['username'] != '' and len(data['username']) == 10 and re.match("[6-9][0-9]{9}", data['username'])) or (data['username'] != '' and re.match("^[a-zA-Z0-9-_]+@[a-zA-Z0-9]+\.[a-z]{1,3}$", data["username"])):
             if data['password'] != '' and len(data['password']) >= 8:
                 userData = primary.users.find_one({"$or": [{"mobile": data["username"]}, {"email": data["username"]}], "status": True, "mobileverified": True})
+                print("userData", userData)
                 if userData is not None:
                     if userData["mobileverified"]:
                         checkPassword = check_password(data['password'], userData['password'])
                         if checkPassword:
                             primary.users.update_one({"_id": userData["_id"]}, {"$set": {"is_active": True}})
-                            token = create_access_token(userData['_id'], userData["roleid"])
+                            token = create_access_token(userData['_id'])
                             return onSuccess("Login successfully", token)
                         else:
                             return badRequest("Invalid mobile or password, Please try again.")
@@ -290,9 +304,9 @@ class Roles(APIView):
             page = int(request.GET.get("page", 1))
             limit = int(request.GET.get("limit", 5))
             getUser = primary.users.find_one({"_id": token["id"]})
-            getGecondaryDB = primary.customers.find_one({"_id": getUser["parentid"]})
-            secondaryDB = secondary[getGecondaryDB['db']]
-            havePermission = getPermission(token["roleid"], "roles", 'view', getGecondaryDB['db'])
+            getSecondaryDB = primary.customers.find_one({"_id": getUser["parentid"]})
+            secondaryDB = secondary[getSecondaryDB['db']]
+            havePermission = getPermission(getUser["roleid"], "roles", 'view', getSecondaryDB['db'])
             if havePermission:
                 id = request.GET.get("id")
                 if id:
@@ -314,10 +328,10 @@ class Roles(APIView):
         if token:
             data = request.data
             getUser = primary.users.find_one({"_id": token["id"]})
-            getGecondaryDB = primary.customers.find_one({"_id": getUser["parentid"]})
-            secondaryDB = secondary[getGecondaryDB['db']]
+            getSecondaryDB = primary.customers.find_one({"_id": getUser["parentid"]})
+            secondaryDB = secondary[getSecondaryDB['db']]
             if data["id"] == '':
-                havePermission = getPermission(token["roleid"], "roles", 'create', getGecondaryDB["db"])
+                havePermission = getPermission(getUser["roleid"], "roles", 'create', getSecondaryDB["db"])
                 if havePermission:
                     if data["name"] != '':
                         existingRole = secondaryDB.roles.find_one({"name": data["name"]})
@@ -353,7 +367,7 @@ class Roles(APIView):
                 else:
                     return unauthorisedRequest()
             else:
-                havePermission = getPermission(token["roleid"], "roles", 'edit', getGecondaryDB["db"])
+                havePermission = getPermission(getUser["roleid"], "roles", 'edit', getSecondaryDB["db"])
                 if havePermission:
                     if data["name"] != '':
                         existingRole = secondaryDB.roles.find_one({"_id": data["id"]})
@@ -394,9 +408,9 @@ class Roles(APIView):
         if token:
             data = request.data
             getUser = primary.users.find_one({"_id": token["id"]})
-            getGecondaryDB = primary.customers.find_one({"_id": getUser["parentid"]})
-            secondaryDB = secondary[getGecondaryDB['db']]
-            havePermission = getPermission(token["roleid"], "roles", 'delete', getGecondaryDB["db"])
+            getSecondaryDB = primary.customers.find_one({"_id": getUser["parentid"]})
+            secondaryDB = secondary[getSecondaryDB['db']]
+            havePermission = getPermission(getUser["roleid"], "roles", 'delete', getSecondaryDB["db"])
             if havePermission:
                 secondaryDB.roles.find_one_and_delete({"_id": data["id"]})
                 secondaryDB.permissions.find_one_and_delete({"roleid": data["id"]})
@@ -414,9 +428,9 @@ class Departments(APIView):
             page = int(request.GET.get("page", 1))
             limit = int(request.GET.get("limit", 5))
             getUser = primary.users.find_one({"_id": token["id"]})
-            getGecondaryDB = primary.customers.find_one({"_id": getUser["parentid"]})
-            secondaryDB = secondary[getGecondaryDB['db']]
-            havePermission = getPermission(token["roleid"], "departments", 'view', getGecondaryDB["db"])
+            getSecondaryDB = primary.customers.find_one({"_id": getUser["parentid"]})
+            secondaryDB = secondary[getSecondaryDB['db']]
+            havePermission = getPermission(getUser["roleid"], "departments", 'view', getSecondaryDB["db"])
             if havePermission:
                 id = request.GET.get("id")
                 if id:
@@ -438,10 +452,10 @@ class Departments(APIView):
         if token:
             data = request.data
             getUser = primary.users.find_one({"_id": token["id"]})
-            getGecondaryDB = primary.customers.find_one({"_id": getUser["parentid"]})
-            secondaryDB = secondary[getGecondaryDB['db']]
+            getSecondaryDB = primary.customers.find_one({"_id": getUser["parentid"]})
+            secondaryDB = secondary[getSecondaryDB['db']]
             if data["id"] == '':
-                havePermission = getPermission(token["roleid"], "departments", 'create', getGecondaryDB["db"])
+                havePermission = getPermission(getUser["roleid"], "departments", 'create', getSecondaryDB["db"])
                 if havePermission:
                     if data["name"] != '':
                         existingDepartment = secondaryDB.departments.find_one({"name": data["name"]})
@@ -466,7 +480,7 @@ class Departments(APIView):
                 else:
                     return unauthorisedRequest()
             else:
-                havePermission = getPermission(token["roleid"], "departments", 'edit', getGecondaryDB["db"])
+                havePermission = getPermission(getUser["roleid"], "departments", 'edit', getSecondaryDB["db"])
                 if havePermission:
                     if data["name"] != '':
                         existingDepartment = secondaryDB.departments.find_one({"_id": data["id"]})
@@ -497,9 +511,9 @@ class Departments(APIView):
         if token:
             data = request.data
             getUser = primary.users.find_one({"_id": token["id"]})
-            getGecondaryDB = primary.customers.find_one({"_id": getUser["parentid"]})
-            secondaryDB = secondary[getGecondaryDB['db']]
-            havePermission = getPermission(token["roleid"], "departments", 'delete', getGecondaryDB["db"])
+            getSecondaryDB = primary.customers.find_one({"_id": getUser["parentid"]})
+            secondaryDB = secondary[getSecondaryDB['db']]
+            havePermission = getPermission(getUser["roleid"], "departments", 'delete', getSecondaryDB["db"])
             if havePermission:
                 secondaryDB.departments.find_one_and_delete({"_id": data["id"]})
                 return onSuccess("Departments deleted successfully", 1)
@@ -516,9 +530,9 @@ class JobWorks(APIView):
             page = int(request.GET.get("page", 1))
             limit = int(request.GET.get("limit", 5))
             getUser = primary.users.find_one({"_id": token["id"]})
-            getGecondaryDB = primary.customers.find_one({"_id": getUser["parentid"]})
-            secondaryDB = secondary[getGecondaryDB['db']]
-            havePermission = getPermission(token["roleid"], "jobworks", 'view', getGecondaryDB["db"])
+            getSecondaryDB = primary.customers.find_one({"_id": getUser["parentid"]})
+            secondaryDB = secondary[getSecondaryDB['db']]
+            havePermission = getPermission(getUser["roleid"], "jobworks", 'view', getSecondaryDB["db"])
             if havePermission:
                 id = request.GET.get("id")
                 if id:
@@ -540,10 +554,10 @@ class JobWorks(APIView):
         if token:
             data = request.data
             getUser = primary.users.find_one({"_id": token["id"]})
-            getGecondaryDB = primary.customers.find_one({"_id": getUser["parentid"]})
-            secondaryDB = secondary[getGecondaryDB['db']]
+            getSecondaryDB = primary.customers.find_one({"_id": getUser["parentid"]})
+            secondaryDB = secondary[getSecondaryDB['db']]
             if data["id"] == '':
-                havePermission = getPermission(token["roleid"], "jobworks", 'create', getGecondaryDB["db"])
+                havePermission = getPermission(getUser["roleid"], "jobworks", 'create', getSecondaryDB["db"])
                 if havePermission:
                     if data["name"] != '':
                         existingJobwork = secondaryDB.jobworks.find_one({"name": data["name"]})
@@ -568,7 +582,7 @@ class JobWorks(APIView):
                 else:
                     return unauthorisedRequest()
             else:
-                havePermission = getPermission(token["roleid"], "jobworks", 'edit', getGecondaryDB["db"])
+                havePermission = getPermission(getUser["roleid"], "jobworks", 'edit', getSecondaryDB["db"])
                 if havePermission:
                     if data["name"] != '':
                         existingJobwork = secondaryDB.jobworks.find_one({"_id": data["id"]})
@@ -599,9 +613,9 @@ class JobWorks(APIView):
         if token:
             data = request.data
             getUser = primary.users.find_one({"_id": token["id"]})
-            getGecondaryDB = primary.customers.find_one({"_id": getUser["parentid"]})
-            secondaryDB = secondary[getGecondaryDB['db']]
-            havePermission = getPermission(token["roleid"], "jobworks", 'delete', getGecondaryDB["db"])
+            getSecondaryDB = primary.customers.find_one({"_id": getUser["parentid"]})
+            secondaryDB = secondary[getSecondaryDB['db']]
+            havePermission = getPermission(getUser["roleid"], "jobworks", 'delete', getSecondaryDB["db"])
             if havePermission:
                 secondaryDB.jobworks.find_one_and_delete({"_id": data["id"]})
                 return onSuccess("Job work deleted successfully", 1)
@@ -618,9 +632,9 @@ class Users(APIView):
             page = int(request.GET.get("page", 1))
             limit = int(request.GET.get("limit", 5))
             getUser = primary.users.find_one({"_id": token["id"]})
-            getGecondaryDB = primary.customers.find_one({"_id": getUser["parentid"]})
-            secondaryDB = secondary[getGecondaryDB['db']]
-            havePermission = getPermission(token["roleid"], "users", 'view', getGecondaryDB["db"])
+            getSecondaryDB = primary.customers.find_one({"_id": getUser["parentid"]})
+            secondaryDB = secondary[getSecondaryDB['db']]
+            havePermission = getPermission(getUser["roleid"], "users", 'view', getSecondaryDB["db"])
             if havePermission:
                 id = request.GET.get("id")
                 if id:
@@ -630,7 +644,7 @@ class Users(APIView):
                     except:
                         return badRequest("Invalid user id, Please try again.")
 
-                usersData = primary.users.find({"parentid": getGecondaryDB["_id"]}).skip(limit * (page - 1)).limit(limit).sort("_id", 1)
+                usersData = primary.users.find({"parentid": getSecondaryDB["_id"]}).skip(limit * (page - 1)).limit(limit).sort("_id", 1)
                 return onSuccess("Users list", list(usersData))
             else:
                 return unauthorisedRequest()
@@ -642,10 +656,10 @@ class Users(APIView):
         if token:
             data = request.data
             getUser = primary.users.find_one({"_id": token["id"]})
-            getGecondaryDB = primary.customers.find_one({"_id": getUser["parentid"]})
-            secondaryDB = secondary[getGecondaryDB['db']]
+            getSecondaryDB = primary.customers.find_one({"_id": getUser["parentid"]})
+            secondaryDB = secondary[getSecondaryDB['db']]
             if data["id"] == '':
-                havePermission = getPermission(token["roleid"], "users", 'create', getGecondaryDB["db"])
+                havePermission = getPermission(getUser["roleid"], "users", 'create', getSecondaryDB["db"])
                 if havePermission:
                     if data['firstname'] != '' and len(data['firstname']) >= 2:
                         if data['lastname'] != '' and len(data['lastname']) >= 2:
@@ -660,7 +674,7 @@ class Users(APIView):
                                         "password": make_password(data["password"], config("PASSWORD_KEY")),
                                         "email": data['email'],
                                         "profile_pic": "",
-                                        "parentid": getGecondaryDB["_id"],
+                                        "parentid": getSecondaryDB["_id"],
                                         "roleid": data["roleid"],
                                         "departments": data["departments"],
                                         "status": True,
@@ -685,7 +699,7 @@ class Users(APIView):
                 else:
                     return unauthorisedRequest()
             else:
-                havePermission = getPermission(token["roleid"], "users", 'edit', getGecondaryDB["db"])
+                havePermission = getPermission(getUser["roleid"], "users", 'edit', getSecondaryDB["db"])
                 if havePermission:
                     if data['firstname'] != '' and len(data['firstname']) >= 2:
                         if data['lastname'] != '' and len(data['lastname']) >= 2:
@@ -710,6 +724,8 @@ class Users(APIView):
                                         return onSuccess("User updated successfully!", updatedUser)
                                     else:
                                         return badRequest("Invalid data to update user, Please try again.")
+                                else:
+                                    return badRequest("Invalid id to uodate data, Please try again.")
                             else:
                                 return badRequest("Invalid email id, Please try again.")
                         else:
@@ -726,9 +742,9 @@ class Users(APIView):
         if token:
             data = request.data
             getUser = primary.users.find_one({"_id": token["id"]})
-            getGecondaryDB = primary.customers.find_one({"_id": getUser["parentid"]})
-            secondaryDB = secondary[getGecondaryDB['db']]
-            havePermission = getPermission(token["roleid"], "users", 'delete', getGecondaryDB["db"])
+            getSecondaryDB = primary.customers.find_one({"_id": getUser["parentid"]})
+            secondaryDB = secondary[getSecondaryDB['db']]
+            havePermission = getPermission(getUser["roleid"], "users", 'delete', getSecondaryDB["db"])
             if havePermission:
                 primary.users.find_one_and_delete({"_id": data["id"]})
                 return onSuccess("User deleted successfully", 1)
