@@ -513,13 +513,11 @@ class Main(APIView):
                         else:
                             return unauthorisedRequest()
                     elif data["id"] != '' and ObjectId().is_valid(data["id"]):
-                        print("elif")
                         havePermission = getPermission(ObjectId(getUser["roleid"]), ObjectId(getMenu["_id"]), 'edit', getSecondaryDB["db"])
                         if havePermission:
                             menuInCollection = getMenu["menuslug"]
                             collection = menuInCollection.replace("-", "_")
                             getCollection = secondaryDB.list_collection_names(filter={"name": {"$regex": collection}})
-                            print()
                             if getCollection[0] == 'main_menu':
                                 if data["menuname"] != '':
                                     existingData = secondaryDB[getCollection[0]].find_one({"$or": [{"menuname": data["menuname"]}, {"_id": ObjectId(data["id"])}]})
