@@ -11,8 +11,10 @@ urlpatterns = [
     path('getprofile', GetProfile.as_view(), name="GetProfile"),
     path('setprofile', SetProfile.as_view(), name="SetProfile"),
 
-    path('role', Roles.as_view(), name="Roles"),
+    # path('role', Roles.as_view(), name="RolesList"),
     path('user', Users.as_view(), name="Users"),
     path('department', Departments.as_view(), name="Departments"),
     path('jobwork', JobWorks.as_view(), name="JobWorks"),
+
+    path("<slug:slug>", Main.as_view(), name="Main"),
 ]

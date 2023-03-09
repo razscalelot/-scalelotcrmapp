@@ -5,6 +5,7 @@ import datetime
 from decouple import config
 from core.response import *
 from pymongo import MongoClient
+from bson.objectid import ObjectId
 
 primary = MongoClient(config('MONGO_CONNECTION_STRING')).scalelotcrmapp
 secondary = MongoClient(config('MONGO_CONNECTION_STRING'))
@@ -12,7 +13,7 @@ secondary = MongoClient(config('MONGO_CONNECTION_STRING'))
 
 def create_access_token(id):
     payload = {
-        "id": id,
+        "_id": str(id),
         "exp": datetime.datetime.utcnow() + datetime.timedelta(minutes=43200),
         "iat": datetime.datetime.utcnow(),
     }
@@ -30,18 +31,15 @@ def authenticate(request):
             payload = jwt.decode(token, config('SECRET_KEY'), algorithms=['HS256'])
         except:
             return False
-        # user = primary.users.find_one({"_id": payload['id']})
-        #
-        # if user is None:
-        #     return False
-
         return payload
     else:
         return False
 
 
 def getPermission(roleid, modelname, permissiontype, secondarydb):
-    result = secondary[secondarydb].permissions.find_one({"roleid": roleid})
+    result = secondary[secondarydb].permissions.find_one({"roleid": ObjectId(roleid)})
+    if roleid == ObjectId("63fd1ae19ac2c074d516b79d"):
+        return True
     if result is not None:
         permission = result["permission"]
         for i in permission:
@@ -62,7 +60,7 @@ def getPermission(roleid, modelname, permissiontype, secondarydb):
                     else:
                         return False
                 if permissiontype == "globalview":
-                    if i["view"]:
+                    if i["globalview"]:
                         return True
                     else:
                         return False
