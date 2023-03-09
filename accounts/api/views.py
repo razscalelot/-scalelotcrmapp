@@ -21,10 +21,12 @@ headers = {
 
 
 def valueEntity(item) -> dict:
-    for key, value in item.items():
-        if ObjectId.is_valid(value):
-            item[key] = str(item[key])
-    return item
+    if item is not None:
+        for key, value in item.items():
+            if ObjectId.is_valid(value):
+                item[key] = str(item[key])
+        return item
+    return None
 
 
 def valuesEntity(entity) -> list:
@@ -124,7 +126,7 @@ class VerifyOtp(APIView):
                     try:
                         secondaryDB.create_collection(collection)
                     except:
-                        continue
+                        pass
                     menu = collection.replace("_", " ")
                     menuLower = menu.lower()
                     menuSlug = menuLower.replace(" ", "-")
@@ -345,7 +347,7 @@ class Main(APIView):
                 secondaryDB = secondary[getSecondaryDB['db']]
                 getMenu = secondaryDB.main_menu.find_one({"menuslug": slug})
                 if getMenu is not None:
-                    if data["id"] == '' and ObjectId().is_valid(data["id"]):
+                    if data["id"] == '':
                         havePermission = getPermission(ObjectId(getUser["roleid"]), ObjectId(getMenu["_id"]), 'create', getSecondaryDB["db"])
                         if havePermission:
                             menuInCollection = getMenu["menuslug"]
@@ -426,6 +428,7 @@ class Main(APIView):
                                                         "disabled": data['disabled'],
                                                         "required": data['required'],
                                                         "showontable": data["showontable"],
+                                                        "unique": data["unique"],
                                                         "status": True,
                                                         "createdAt": datetime.now(),
                                                         "createdBy": ObjectId(token["_id"]),
@@ -510,11 +513,13 @@ class Main(APIView):
                         else:
                             return unauthorisedRequest()
                     elif data["id"] != '' and ObjectId().is_valid(data["id"]):
+                        print("elif")
                         havePermission = getPermission(ObjectId(getUser["roleid"]), ObjectId(getMenu["_id"]), 'edit', getSecondaryDB["db"])
                         if havePermission:
                             menuInCollection = getMenu["menuslug"]
                             collection = menuInCollection.replace("-", "_")
                             getCollection = secondaryDB.list_collection_names(filter={"name": {"$regex": collection}})
+                            print()
                             if getCollection[0] == 'main_menu':
                                 if data["menuname"] != '':
                                     existingData = secondaryDB[getCollection[0]].find_one({"$or": [{"menuname": data["menuname"]}, {"_id": ObjectId(data["id"])}]})
@@ -547,7 +552,7 @@ class Main(APIView):
                                             if data['fieldgrid'] != '':
                                                 existingField = secondaryDB[getCollection[0]].find_one({"$or": [{"fieldname": data["fieldname"]}], "_id": {"$ne": ObjectId(data["id"])}})
                                                 if not existingField:
-                                                    fieldvalue = re.sub(" |_|-", "_", data['fieldname'].lower())
+                                                    fieldvalue = re.sub(" |_|-", "", data['fieldname'].lower())
                                                     obj = {"$set": {
                                                         "fieldbelongsto": data['fieldbelongsto'],
                                                         "fieldname": data['fieldname'],
@@ -559,6 +564,7 @@ class Main(APIView):
                                                         "disabled": data['disabled'],
                                                         "required": data['required'],
                                                         "showontable": data["showontable"],
+                                                        "unique": data["unique"],
                                                         "updatedAt": datetime.now(),
                                                         "updatedBy": ObjectId(token["_id"]),
                                                     }
@@ -592,7 +598,7 @@ class Main(APIView):
                                             if i == getField["fieldvalue"]:
                                                 if getField["required"] and data[i] != '':
                                                     existingData = secondaryDB[getCollection[0]].find_one({getField["fieldvalue"]: data[i]})
-                                                    if getField["unique"] and existingData is not None:
+                                                    if getField["unique"] and not existingData:
                                                         getData[getField["fieldvalue"]] = data[i]
                                                     elif not getField["unique"]:
                                                         getData[getField["fieldvalue"]] = data[i]
