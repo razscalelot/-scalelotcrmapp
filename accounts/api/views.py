@@ -108,7 +108,7 @@ class SignUpUser(APIView):
 
 
 class VerifyOtp(APIView):
-    def post(self, request):
+     def post(self, request):
         data = request.data
         if data["key"] != '' and data["otp"] != '' and data["mobile"]:
             userData = primary.users.find_one({"mobile": data["mobile"], "otpVerifyKey": 1234})
